@@ -1,0 +1,8 @@
+# Bootstrap state is local on purpose (chicken-and-egg).
+# It's tiny but DO NOT commit it - it contains the bucket name and AWS account ID.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example

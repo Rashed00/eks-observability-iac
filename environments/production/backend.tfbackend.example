@@ -1,0 +1,15 @@
+# Copy this file to `backend.tfbackend` (gitignored) and fill in the values
+# from the bootstrap step:
+#
+#   cd ../../bootstrap/tf-state && terraform output backend_config_example
+#
+# Then:
+#
+#   terraform init -backend-config=backend.tfbackend
+#
+bucket       = "eks-observability-tfstate-CHANGEME"
+key          = "observability-cluster/production/terraform.tfstate"
+region       = "eu-central-1"
+encrypt      = true
+use_lockfile = true
+profile      = "default"

@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored - never commit secrets.
+
+aws_region   = "eu-central-1"
+aws_profile  = "default"
+single_az    = "eu-central-1a"
+
+cluster_name           = "observability-cluster"
+environment            = "production"
+root_domain            = "example.com"        # You must own this Route53 zone
+observability_subdomain = "monitoring"
+
+cluster_version = "1.34"
+vpc_cidr        = "10.0.0.0/16"
+
+# Secrets (use a secret-manager or a sealed tfvars file for these)
+grafana_admin_user               = "admin"
+grafana_admin_password           = "change-me-immediately"
+remote_write_basic_auth_user     = "alloy"
+remote_write_basic_auth_password = "change-me-immediately"
+alertmanager_slack_webhook_url   = ""

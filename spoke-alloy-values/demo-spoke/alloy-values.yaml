@@ -1,0 +1,266 @@
+# Grafana Alloy values for the demo-spoke EKS cluster.
+#
+# Pushes metrics + logs + traces from this cluster to the hub cluster's NLB,
+# protected by HTTPS basic auth (Envoy SecurityPolicy on the hub).
+#
+# Customize:
+#   - external_labels.cluster = "<spoke-name>"
+#   - remote-write URLs (replace monitoring.example.com with your domain)
+#   - basic_auth username/password (the values you set in Terraform secrets)
+
+alloy:
+  clustering:
+    enabled: true
+
+  configMap:
+    content: |
+      logging {
+        level  = "info"
+        format = "logfmt"
+      }
+
+      // ============================================================
+      // METRICS - remote_write to the hub Prometheus
+      // ============================================================
+
+      // Drop high-cardinality metrics before sending. Saves Prometheus
+      // memory at the hub at no observability cost.
+      prometheus.relabel "drop_high_cardinality" {
+        forward_to = [prometheus.remote_write.hub.receiver]
+
+        rule {
+          source_labels = ["__name__"]
+          regex         = "container_tasks_state|container_memory_failures_total"
+          action        = "drop"
+        }
+
+        // Drop noisy histogram buckets (keep _sum and _count).
+        rule {
+          source_labels = ["__name__"]
+          regex         = "(apiserver_request_duration_seconds_bucket|etcd_request_duration_seconds_bucket|workqueue_(queue|work)_duration_seconds_bucket)"
+          action        = "drop"
+        }
+
+        rule {
+          source_labels = ["__name__"]
+          regex         = "container_blkio_.*"
+          action        = "drop"
+        }
+      }
+
+      prometheus.remote_write "hub" {
+        external_labels = {
+          cluster     = "demo-spoke",
+          environment = "demo",
+        }
+
+        endpoint {
+          url = "https://prometheus.monitoring.example.com/api/v1/write"
+
+          basic_auth {
+            username = "alloy"
+            password = sys.env("REMOTE_WRITE_PASSWORD")
+          }
+        }
+      }
+
+      // Node metrics
+      prometheus.exporter.unix "node" {}
+
+      prometheus.scrape "node" {
+        targets         = prometheus.exporter.unix.node.targets
+        forward_to      = [prometheus.relabel.drop_high_cardinality.receiver]
+        scrape_interval = "60s"
+      }
+
+      // Kubelet
+      discovery.kubernetes "nodes" {
+        role = "node"
+      }
+
+      discovery.relabel "kubelet" {
+        targets = discovery.kubernetes.nodes.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_node_name"]
+          target_label  = "node"
+        }
+
+        rule {
+          replacement  = "https"
+          target_label = "__scheme__"
+        }
+
+        rule {
+          source_labels = ["__address__"]
+          regex         = "(.+):(.+)"
+          replacement   = "$1:10250"
+          target_label  = "__address__"
+        }
+      }
+
+      prometheus.scrape "kubelet" {
+        targets         = discovery.relabel.kubelet.output
+        forward_to      = [prometheus.relabel.drop_high_cardinality.receiver]
+        job_name        = "integrations/kubernetes/kubelet"
+        scheme          = "https"
+        scrape_interval = "60s"
+
+        tls_config {
+          insecure_skip_verify = true
+        }
+
+        bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+      }
+
+      prometheus.scrape "cadvisor" {
+        targets         = discovery.relabel.kubelet.output
+        forward_to      = [prometheus.relabel.drop_high_cardinality.receiver]
+        job_name        = "integrations/kubernetes/cadvisor"
+        scheme          = "https"
+        scrape_interval = "60s"
+        metrics_path    = "/metrics/cadvisor"
+
+        tls_config {
+          insecure_skip_verify = true
+        }
+
+        bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+      }
+
+      // ============================================================
+      // LOGS - push to the hub Loki
+      // ============================================================
+
+      loki.write "hub" {
+        endpoint {
+          url = "https://loki.monitoring.example.com/loki/api/v1/push"
+
+          basic_auth {
+            username = "alloy"
+            password = sys.env("REMOTE_WRITE_PASSWORD")
+          }
+        }
+
+        external_labels = {
+          cluster = "demo-spoke",
+        }
+      }
+
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+      }
+
+      loki.source.kubernetes "pod_logs" {
+        targets    = discovery.relabel.pod_logs.output
+        forward_to = [loki.process.pod_logs.receiver]
+      }
+
+      loki.process "pod_logs" {
+        stage.static_labels {
+          values = {
+            cluster = "demo-spoke",
+          }
+        }
+
+        stage.json {
+          expressions = { level = "level" }
+        }
+
+        stage.labels {
+          values = { level = "level" }
+        }
+
+        forward_to = [loki.write.hub.receiver]
+      }
+
+      // Kubernetes events
+      loki.source.kubernetes_events "events" {
+        job_name   = "integrations/kubernetes/eventhandler"
+        log_format = "logfmt"
+        forward_to = [loki.process.events.receiver]
+      }
+
+      loki.process "events" {
+        stage.static_labels {
+          values = { cluster = "demo-spoke" }
+        }
+        forward_to = [loki.write.hub.receiver]
+      }
+
+      // ============================================================
+      // TRACES - OTLP, forward to the hub Tempo
+      // ============================================================
+
+      otelcol.receiver.otlp "default" {
+        grpc {
+          endpoint = "0.0.0.0:4317"
+        }
+        http {
+          endpoint = "0.0.0.0:4318"
+        }
+
+        output {
+          traces = [otelcol.exporter.otlphttp.tempo.input]
+        }
+      }
+
+      otelcol.exporter.otlphttp "tempo" {
+        client {
+          endpoint = "https://tempo.monitoring.example.com"
+          auth     = otelcol.auth.basic.tempo.handler
+        }
+      }
+
+      otelcol.auth.basic "tempo" {
+        username = "alloy"
+        password = sys.env("REMOTE_WRITE_PASSWORD")
+      }
+
+  envFrom:
+    - secretRef:
+        name: alloy-remote-write-credentials
+
+controller:
+  type: daemonset
+
+  tolerations:
+    - operator: Exists
+
+serviceAccount:
+  create: true
+
+rbac:
+  create: true
+
+# Mount host paths for log collection
+extraMounts:
+  - name: varlog
+    mountPath: /var/log
+    hostPath: /var/log
+    readOnly: true
+  - name: varlibcontainerd
+    mountPath: /var/lib/containerd
+    hostPath: /var/lib/containerd
+    readOnly: true

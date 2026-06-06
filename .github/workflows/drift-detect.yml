@@ -1,0 +1,69 @@
+name: Drift Detect
+
+on:
+  schedule:
+    # 06:00 UTC every day
+    - cron: '0 6 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+env:
+  TF_VERSION: '1.10.5'
+
+jobs:
+  drift:
+    name: terraform plan (production)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform init
+        working-directory: environments/production
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=observability-cluster/production/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true"
+
+      - name: terraform plan -detailed-exitcode
+        id: plan
+        working-directory: environments/production
+        env:
+          TF_VAR_grafana_admin_password: ${{ secrets.TF_VAR_grafana_admin_password }}
+          TF_VAR_remote_write_basic_auth_password: ${{ secrets.TF_VAR_remote_write_basic_auth_password }}
+        run: |
+          set +e
+          terraform plan -detailed-exitcode -no-color -input=false -out=tfplan > plan.txt 2>&1
+          echo "exitcode=$?" >> "$GITHUB_OUTPUT"
+          cat plan.txt
+
+      - name: Open issue on drift
+        if: steps.plan.outputs.exitcode == '2'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('environments/production/plan.txt', 'utf8');
+            const truncated = plan.length > 60000 ? plan.slice(0, 60000) + '\n...[truncated]' : plan;
+            const { owner, repo } = context.repo;
+            await github.rest.issues.create({
+              owner, repo,
+              title: `[drift] Terraform plan detected changes on ${new Date().toISOString().slice(0,10)}`,
+              labels: ['drift', 'terraform'],
+              body: '### Drift detected\n\n```terraform\n' + truncated + '\n```'
+            });

@@ -1,0 +1,143 @@
+name: PR Validate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'environments/**'
+      - 'bootstrap/**'
+      - 'spokes/**'
+      - '.github/workflows/pr-validate.yml'
+
+# Minimal permissions, plus OIDC so we can assume an AWS role for `terraform plan`.
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: pr-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: '1.10.5'
+  TFLINT_VERSION: 'v0.55.1'
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # Cheap, parallelizable checks that don't need AWS.
+  # ----------------------------------------------------------------------------
+  fmt:
+    name: terraform fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - run: terraform fmt -check -recursive
+
+  validate:
+    name: terraform validate (${{ matrix.path }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        path:
+          - environments/production
+          - bootstrap/tf-state
+          - spokes/demo-spoke
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - name: terraform init (no backend)
+        working-directory: ${{ matrix.path }}
+        run: terraform init -backend=false
+      - name: terraform validate
+        working-directory: ${{ matrix.path }}
+        run: terraform validate
+
+  tflint:
+    name: tflint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - run: tflint --init
+      - run: tflint --recursive
+
+  tfsec:
+    name: tfsec (security scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          soft_fail: false
+          additional_args: --concise-output
+
+  # ----------------------------------------------------------------------------
+  # terraform plan against the production environment and comment on PR.
+  # Requires the role-arn to be configured as a repo variable AWS_OIDC_ROLE_ARN.
+  # ----------------------------------------------------------------------------
+  plan:
+    name: terraform plan (production)
+    runs-on: ubuntu-latest
+    needs: [fmt, validate, tflint, tfsec]
+    if: ${{ vars.AWS_OIDC_ROLE_ARN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: true
+
+      - name: terraform init
+        working-directory: environments/production
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=observability-cluster/production/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true"
+
+      - name: terraform plan
+        id: plan
+        working-directory: environments/production
+        run: |
+          terraform plan -no-color -input=false -out=tfplan
+        continue-on-error: true
+
+      - name: Comment plan on PR
+        uses: actions/github-script@v7
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+        with:
+          script: |
+            const plan = process.env.PLAN || '(empty)';
+            const truncated = plan.length > 60000 ? plan.slice(0, 60000) + '\n...[truncated]' : plan;
+            const body = [
+              '### Terraform plan (production)',
+              '',
+              '```terraform',
+              truncated,
+              '```',
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+
+      - name: Fail if plan errored
+        if: steps.plan.outcome == 'failure'
+        run: exit 1

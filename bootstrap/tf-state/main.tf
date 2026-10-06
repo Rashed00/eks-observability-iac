@@ -35,7 +35,7 @@ resource "aws_s3_bucket" "tfstate" {
   tags = {
     Project   = "eks-observability"
     Purpose   = "Terraform remote state"
-    ManagedBy = "Terraform (bootstrap)"
+    ManagedBy = "Terraform bootstrap"
   }
 }
 

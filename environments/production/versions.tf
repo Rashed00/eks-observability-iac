@@ -29,6 +29,10 @@ terraform {
       source  = "hashicorp/tls"
       version = "~> 4.0"
     }
+    external = {
+      source  = "hashicorp/external"
+      version = "~> 2.3"
+    }
   }
 
   # S3 backend with native state locking (Terraform >= 1.10).

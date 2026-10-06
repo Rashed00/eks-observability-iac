@@ -62,6 +62,20 @@ resource "aws_iam_policy" "external_secrets" {
   })
 }
 
+
+# Envoy Gateway's basic auth only accepts {SHA} hashes (SHA1, base64 of the
+# raw digest). Terraform has no function for that, so openssl does it.
+data "external" "remote_write_htpasswd" {
+  program = ["bash", "-c", <<-EOT
+    set -euo pipefail
+    pw=$(jq -r .password)
+    printf '{"sha":"%s"}' "$(printf '%s' "$pw" | openssl dgst -binary -sha1 | base64)"
+  EOT
+  ]
+  query = {
+    password = var.remote_write_basic_auth_password
+  }
+}
 # ---------------------------------------------------------------------------
 # Secrets
 # ---------------------------------------------------------------------------
@@ -95,7 +109,7 @@ resource "aws_secretsmanager_secret_version" "remote_write_auth" {
     password = var.remote_write_basic_auth_password
     # bcrypt $2y$ hash of <password>, formatted as user:hash for Envoy.
     # Envoy's basic auth filter accepts htpasswd-style entries.
-    htpasswd = "${var.remote_write_basic_auth_user}:{SHA}${base64sha1(var.remote_write_basic_auth_password)}"  
+    htpasswd = "${var.remote_write_basic_auth_user}:{SHA}${data.external.remote_write_htpasswd.result.sha}"
     })
 }
 

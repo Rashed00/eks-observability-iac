@@ -200,10 +200,11 @@ resource "aws_iam_service_linked_role" "spot" {
 
 module "karpenter" {
   source  = "terraform-aws-modules/eks/aws//modules/karpenter"
-  version = "~> 21.10"
+  version = "~> 21.26.0"
 
   cluster_name                    = module.eks.cluster_name
   create_pod_identity_association = true
+  enable_inline_policy            = true
 
   node_iam_role_additional_policies = {
     AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"

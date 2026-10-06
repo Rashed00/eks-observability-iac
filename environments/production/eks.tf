@@ -161,6 +161,7 @@ module "eks" {
   tags = {
     "karpenter.sh/discovery" = var.cluster_name
   }
+  depends_on = [module.fck_nat]
 }
 
 # EBS CSI driver IRSA.

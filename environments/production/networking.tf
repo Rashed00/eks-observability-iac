@@ -54,7 +54,7 @@ module "fck_nat" {
 
   # ARM t4g.nano spot - ~3 USD/month
   instance_type      = "t4g.nano"
-  use_spot_instances = true
+  use_spot_instances = false
 
   # ASG with size 1 so the instance auto-recovers if it dies.
   ha_mode = true

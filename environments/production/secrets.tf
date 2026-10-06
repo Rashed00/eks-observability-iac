@@ -95,8 +95,8 @@ resource "aws_secretsmanager_secret_version" "remote_write_auth" {
     password = var.remote_write_basic_auth_password
     # bcrypt $2y$ hash of <password>, formatted as user:hash for Envoy.
     # Envoy's basic auth filter accepts htpasswd-style entries.
-    htpasswd = "${var.remote_write_basic_auth_user}:${bcrypt(var.remote_write_basic_auth_password)}"
-  })
+    htpasswd = "${var.remote_write_basic_auth_user}:{SHA}${base64sha1(var.remote_write_basic_auth_password)}"  
+    })
 }
 
 resource "aws_secretsmanager_secret" "alertmanager_slack" {

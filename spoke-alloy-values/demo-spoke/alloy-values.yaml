@@ -5,7 +5,7 @@
 #
 # Customize:
 #   - external_labels.cluster = "<spoke-name>"
-#   - remote-write URLs (replace monitoring.example.com with your domain)
+#   - remote-write URLs (replace monitoring.relsayed.online with your domain)
 #   - basic_auth username/password (the values you set in Terraform secrets)
 
 alloy:
@@ -55,7 +55,7 @@ alloy:
         }
 
         endpoint {
-          url = "https://prometheus.monitoring.example.com/api/v1/write"
+          url = "https://prometheus.monitoring.relsayed.online/api/v1/write"
 
           basic_auth {
             username = "alloy"
@@ -134,7 +134,7 @@ alloy:
 
       loki.write "hub" {
         endpoint {
-          url = "https://loki.monitoring.example.com/loki/api/v1/push"
+          url = "https://loki.monitoring.relsayed.online/loki/api/v1/push"
 
           basic_auth {
             username = "alloy"
@@ -228,7 +228,7 @@ alloy:
 
       otelcol.exporter.otlphttp "tempo" {
         client {
-          endpoint = "https://tempo.monitoring.example.com"
+          endpoint = "https://tempo.monitoring.relsayed.online"
           auth     = otelcol.auth.basic.tempo.handler
         }
       }

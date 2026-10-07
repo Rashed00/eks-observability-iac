@@ -29,7 +29,7 @@ locals {
 
 resource "aws_s3_bucket" "logs" {
   bucket        = "${var.cluster_name}-logs-${local.account_id}"
-  force_destroy = false
+  force_destroy = true
 
   tags = {
     Name    = "${var.cluster_name}-logs"
@@ -58,7 +58,7 @@ resource "aws_s3_bucket" "observability" {
   for_each = local.s3_buckets
 
   bucket        = "${var.cluster_name}-${each.value.name}-${local.account_id}"
-  force_destroy = false
+  force_destroy = true
 
   tags = {
     Name    = "${var.cluster_name}-${each.value.name}"

@@ -65,4 +65,5 @@ module "fck_nat" {
     for idx, rt_id in module.vpc.private_route_table_ids :
     "private-${local.azs[idx]}" => rt_id
   }
+  depends_on = [module.vpc]
 }

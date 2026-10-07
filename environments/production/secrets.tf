@@ -76,6 +76,7 @@ data "external" "remote_write_htpasswd" {
     password = var.remote_write_basic_auth_password
   }
 }
+
 # ---------------------------------------------------------------------------
 # Secrets
 # ---------------------------------------------------------------------------
@@ -83,7 +84,7 @@ data "external" "remote_write_htpasswd" {
 resource "aws_secretsmanager_secret" "grafana" {
   name                    = "observability/grafana"
   description             = "Grafana admin credentials"
-  recovery_window_in_days = 7
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "grafana" {
@@ -99,7 +100,7 @@ resource "aws_secretsmanager_secret_version" "grafana" {
 resource "aws_secretsmanager_secret" "remote_write_auth" {
   name                    = "observability/remote-write-basic-auth"
   description             = "Basic auth credentials used by spoke clusters to push telemetry"
-  recovery_window_in_days = 7
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "remote_write_auth" {
@@ -118,7 +119,7 @@ resource "aws_secretsmanager_secret" "alertmanager_slack" {
 
   name                    = "observability/alertmanager-slack"
   description             = "Alertmanager Slack webhook URL"
-  recovery_window_in_days = 7
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "alertmanager_slack" {

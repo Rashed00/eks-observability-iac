@@ -88,6 +88,10 @@ step_preflight() {
   [[ -n "${bucket}" ]] || die "Could not read the bucket name from backend.tfbackend"
   aws s3api head-bucket --bucket "${bucket}" >/dev/null 2>&1 \
     || die "State bucket '${bucket}' does not exist. Run bootstrap/tf-state first."
+  # The EC2 Spot service-linked role belongs to the whole AWS account, so
+  # Terraform must not own it. Create it only if it is missing.
+  aws iam get-role --role-name AWSServiceRoleForEC2Spot >/dev/null 2>&1 \
+    || aws iam create-service-linked-role --aws-service-name spot.amazonaws.com >/dev/null
 
   # Route53 zone, and Hostinger pointing at it.
   local zone_line zone_id zone_name
@@ -218,15 +222,23 @@ step_cert() {
   git -C "${GITOPS_DIR}" pull --ff-only
   sed -i -E "s#arn:aws:acm:[a-z0-9-]+:[0-9]+:certificate/[0-9a-f-]+#${arn}#" "${file}"
 
-  if git -C "${GITOPS_DIR}" diff --quiet -- "${rel}"; then
-    echo "Already up to date."
-  else
-    [[ "$(git -C "${GITOPS_DIR}" branch --show-current)" == "main" ]] \
-      || die "The gitops repo is not on the 'main' branch."
+  if ! git -C "${GITOPS_DIR}" diff --quiet -- "${rel}"; then
     git -C "${GITOPS_DIR}" add "${rel}"
     git -C "${GITOPS_DIR}" commit -m "chore: set ACM certificate ARN for the new cluster"
+  fi
+
+  [[ "$(git -C "${GITOPS_DIR}" branch --show-current)" == "main" ]] \
+    || die "The gitops repo is not on the 'main' branch."
+
+  # Push anything GitHub does not have yet. This also covers a commit left
+  # over from an earlier run whose push failed.
+  git -C "${GITOPS_DIR}" fetch origin main
+  if [[ -n "$(git -C "${GITOPS_DIR}" log origin/main..HEAD --oneline)" ]]; then
     git -C "${GITOPS_DIR}" push origin main
   fi
+
+  git -C "${GITOPS_DIR}" show "origin/main:${rel}" | grep -q "${arn}" \
+    || die "GitHub does not have the new certificate ARN yet."
   grep ssl-cert "${file}"
 }
 

@@ -186,17 +186,7 @@ module "ebs_csi_irsa" {
 # Provisions additional spot nodes on demand. Pinned to var.single_az.
 ################################################################################
 
-# EC2 Spot service-linked role - required once per AWS account.
-# Wrap in a `try` so re-applies in an account that already has the SLR don't
-# fail. If you hit "AlreadyExists" on a fresh apply, remove this resource.
-resource "aws_iam_service_linked_role" "spot" {
-  aws_service_name = "spot.amazonaws.com"
-  description      = "Service-linked role for EC2 Spot Instances"
 
-  lifecycle {
-    ignore_changes = [aws_service_name]
-  }
-}
 
 module "karpenter" {
   source  = "terraform-aws-modules/eks/aws//modules/karpenter"
@@ -210,7 +200,6 @@ module "karpenter" {
     AmazonSSMManagedInstanceCore = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
   }
 
-  depends_on = [aws_iam_service_linked_role.spot]
 }
 
 resource "helm_release" "karpenter" {
